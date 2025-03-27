@@ -1,4 +1,4 @@
-import { Component, DestroyRef, inject } from '@angular/core';
+import { Component, DestroyRef, effect, inject, signal } from '@angular/core';
 import { MoviesService } from '../../services/movies.service';
 import { AsyncPipe } from '@angular/common';
 import { Movie } from '../../models/movie';
@@ -8,22 +8,25 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 @Component({
   selector: 'app-movies',
-  imports: [MovieComponent, InfiniteScrollDirective],
+  imports: [MovieComponent, InfiniteScrollDirective, AsyncPipe],
   templateUrl: './movies.component.html',
   styleUrl: './movies.component.css',
 })
 export class MoviesComponent {
+  searchQuery = signal('');
   private moviesService = inject(MoviesService);
   private pageNumber = 1;
   private destroyRef = inject(DestroyRef);
-  public moviesObs$ = this.moviesService.fetchMoviesByType(
-    'popular',
-    this.pageNumber
-  );
+  public genres$ = this.moviesService.fetchMovieGenres();
   public moviesResults: Movie[] = [];
 
   ngOnInit() {
-    this.moviesObs$
+    this.getAllMovies();
+  }
+
+  getAllMovies() {
+    this.moviesService
+      .fetchMoviesByType('popular', this.pageNumber)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((data) => {
         this.moviesResults = data.results;
@@ -32,14 +35,51 @@ export class MoviesComponent {
 
   onScroll(): void {
     this.pageNumber++;
-    this.moviesObs$ = this.moviesService.fetchMoviesByType(
-      'popular',
-      this.pageNumber
-    );
-    this.moviesObs$
+
+    let movies$;
+
+    if (this.searchQuery()) {
+      movies$ = this.moviesService.fetchMovieBySearch(
+        this.searchQuery(),
+        this.pageNumber
+      );
+    } else {
+      movies$ = this.moviesService.fetchMoviesByType(
+        'popular',
+        this.pageNumber
+      );
+    }
+    console.log(this.pageNumber);
+    movies$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((data) => {
+      const newMovies = data.results.filter(
+        (movie) => !this.moviesResults.some((m) => m.id === movie.id)
+      );
+      this.moviesResults = [...this.moviesResults, ...newMovies];
+    });
+  }
+
+  onInputChange(event: Event) {
+    const input = event.target as HTMLInputElement;
+    this.updateSearch(input.value);
+  }
+
+  updateSearch(query: string) {
+    this.searchQuery.set(query);
+    this.moviesService
+      .fetchMovieBySearch(this.searchQuery())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((data) => {
-        this.moviesResults = this.moviesResults.concat(data.results);
+        this.moviesResults = data.results;
+      });
+  }
+
+  onGenreChange(event: Event) {
+    const selectedValue = (event.target as HTMLSelectElement).value;
+    this.moviesService
+      .fetchMoviesByGenre(Number(selectedValue))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((data) => {
+        this.moviesResults = data.results;
       });
   }
 }
